@@ -20,9 +20,9 @@ void setup() {
   Serial.begin(9600);
 
   WiFi.mode(WIFI_STA);
-  wifiMulti.addAP("T3", "diwana_746");
-  wifiMulti.addAP("T2", "diwana_746");
-  wifiMulti.addAP("nvtestwireless", "Sp33doflight");
+  wifiMulti.addAP("", "");
+  wifiMulti.addAP("", "");
+  wifiMulti.addAP("", "");
   
   pinMode(TRIGGERPIN, OUTPUT);
   pinMode(ECHOPIN, INPUT);
