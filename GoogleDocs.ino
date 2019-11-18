@@ -2,30 +2,34 @@
 #include "HTTPSRedirect.h"
 #include <ESP8266WiFiMulti.h>
 
-#define TRIGGERPIN D1
-#define ECHOPIN    D2
+#define SMSensor A0
+#define Relay D1
 
 ESP8266WiFiMulti wifiMulti;
 
 const char* host = "script.google.com";
 const char* googleRedirHost = "script.googleusercontent.com";
 const char *GScriptId = "AKfycbyt2xy6KtumV7Eu8ODkkto4JUWNGJ6bYU1HQ7RBNdmI7FWw2Vw";
-
 const int httpsPort = 443;
 
-// echo | openssl s_client -connect script.google.com:443 |& openssl x509 -fingerprint -noout
-const char* fingerprint = "37 83 9B 99 A1 C9 7D 64 9B 3D 93 1F F0 55 EB A5 F1 49 34 34";
+//echo | openssl s_client -connect script.google.com:443 |& openssl x509 -fingerprint -noout
+//const char* fingerprint = "37 83 9B 99 A1 C9 7D 64 9B 3D 93 1F F0 55 EB A5 F1 49 34 34";
 
+String relayStatus;
+String url;
+float moisture_percentage;
+float moistureThreshold = 40.0;
+int sensor_analog;
+int systemStarted = millis();
+ 
 void setup() {
   Serial.begin(9600);
-
   WiFi.mode(WIFI_STA);
-  wifiMulti.addAP("", "");
-  wifiMulti.addAP("", "");
-  wifiMulti.addAP("", "");
+  wifiMulti.addAP("T2", "diwana_746");
+  wifiMulti.addAP("T3", "diwana_746");
   
-  pinMode(TRIGGERPIN, OUTPUT);
-  pinMode(ECHOPIN, INPUT);
+  pinMode(Relay, OUTPUT);
+  pinMode(SMSensor, INPUT);
   
   Serial.println();
   Serial.print("Connecting to wifi: ");
@@ -34,67 +38,73 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
+  Serial.println("WiFi connected with IP address: ");
   Serial.println(WiFi.localIP());
-
-  // Use HTTPSRedirect class to create TLS connection
-  HTTPSRedirect client(httpsPort);
-  client.setInsecure();
-
-  Serial.print("Connecting to ");
-  Serial.println(host);
-
-  bool flag = false;
-  for (int i = 0; i < 5; i++) {
-    int retval = client.connect(host, httpsPort);
-    if (retval == 1) {
-      flag = true;
-      break;
-    }
-    else
-      Serial.println("Connection failed. Retrying...");
-    delay(1000);
-  }
-
-  Serial.flush();
-  if (!flag) {
-    Serial.print("Could not connect to server: ");
-    Serial.println(host);
-    Serial.println("Exiting...");
-    return;
-  }
-
-  Serial.flush();
-  if (client.verify(fingerprint, host)) {
-    Serial.println("Certificate match.");
-  } else {
-    Serial.println("Certificate mis-match");
-  }
 }
 
 void loop() {
   HTTPSRedirect client(httpsPort);
   client.setInsecure();
-  if (!client.connected())           
+  sensor_analog = analogRead(SMSensor);
+  moisture_percentage = ( 100 - ( (sensor_analog/1023.00) * 100 ) );
+
+  if (moisture_percentage > 96){
+    url = String("/macros/s/") + GScriptId + "/exec?tmp=NA&relay=NA&status=Sensor_Failure";
+    while (!client.connected())           
+      client.connect(host, httpsPort);
+    client.printRedir(url, host, googleRedirHost);      
+  }
+
+  while (moisture_percentage >= moistureThreshold){
+    delay(60*30000UL);
+    sensor_analog = analogRead(SMSensor);
+    moisture_percentage = ( 100 - ( (sensor_analog/1023.00) * 100 ) );
+    Serial.print( "Moisture % with Relay OFF : " );
+    Serial.println( moisture_percentage );
+    int systemElapsed = millis() - systemStarted;
+    if (systemElapsed >= 60*60000UL){
+      url = String("/macros/s/") + GScriptId + "/exec?relay=NA&status=Wait" + "&tmp=" + moisture_percentage;
+      while (!client.connected())           
+        client.connect(host, httpsPort);
+      client.printRedir(url, host, googleRedirHost);      
+//      ESP.restart();
+    }
+  }
+
+  relayStatus = "ON";
+  url = String("/macros/s/") + GScriptId + "/exec?tmp=" + moisture_percentage + "&relay=" + relayStatus;
+  while (!client.connected())           
     client.connect(host, httpsPort);
+  client.printRedir(url, host, googleRedirHost);      
+  digitalWrite (Relay, HIGH);
 
-  long duration, distance;
-  digitalWrite(TRIGGERPIN, LOW);
-  delayMicroseconds(3);
-  digitalWrite(TRIGGERPIN, HIGH);
-  delayMicroseconds(12);
-  digitalWrite(TRIGGERPIN, LOW);
-  duration = pulseIn(ECHOPIN, HIGH);
-  
-  distance = (duration / 2) / 29.1;
-  distance = distance - 1.5;
+  int motorStart = millis();
+  int motorElapsed = millis() - motorStart;
+  while ((moisture_percentage < moistureThreshold) and (motorElapsed <= 5*60000UL)){
+    delay(1*30000UL);
+    sensor_analog = analogRead(SMSensor);
+    moisture_percentage = ( 100 - ( (sensor_analog/1023.00) * 100 ) );
+    Serial.print( "Moisture % with Relay ON : " );
+    Serial.println( moisture_percentage );
+    motorElapsed = millis() - motorStart;
+    Serial.print( "motorOnfor : " );
+    Serial.println(motorElapsed);
+  }
 
-  Serial.print( "Read dist(CM): " );
-  Serial.println( distance );
+  relayStatus = "OFF";
+  url = String("/macros/s/") + GScriptId + "/exec?tmp=" + moisture_percentage + "&relay=" + relayStatus;
+  while (!client.connected())           
+    client.connect(host, httpsPort);
+  client.printRedir(url, host, googleRedirHost);      
+  digitalWrite (Relay, LOW);
+  delay(5000);
 
-  String url = String("/macros/s/") + GScriptId + "/exec?tmp=" + distance;
-  client.printRedir(url, host, googleRedirHost);
-
-  delay(15*60000UL);
+  int systemElapsed = millis() - systemStarted;
+  if (systemElapsed >= 180*60000UL){
+    url = String("/macros/s/") + GScriptId + "/exec?relay=NA&status=Restart" + "&tmp=" + moisture_percentage;
+    while (!client.connected())           
+      client.connect(host, httpsPort);
+    client.printRedir(url, host, googleRedirHost);      
+      ESP.restart();
+  }
 }
