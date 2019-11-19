@@ -25,8 +25,8 @@ int systemStarted = millis();
 void setup() {
   Serial.begin(9600);
   WiFi.mode(WIFI_STA);
-  wifiMulti.addAP("T2", "diwana_746");
-  wifiMulti.addAP("T3", "diwana_746");
+  wifiMulti.addAP("", "");
+  wifiMulti.addAP("", "");
   
   pinMode(Relay, OUTPUT);
   pinMode(SMSensor, INPUT);
